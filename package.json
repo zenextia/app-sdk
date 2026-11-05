@@ -1,0 +1,43 @@
+{
+  "name": "@zenextia/app-sdk",
+  "version": "0.1.0",
+  "description": "Identity and shared data for applications published on Zenextia.",
+  "keywords": [
+    "zenextia",
+    "ai-factory",
+    "sdk"
+  ],
+  "homepage": "https://github.com/zenextia/app-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/zenextia/app-sdk/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zenextia/app-sdk.git"
+  },
+  "license": "MIT",
+  "author": "Zenextia",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "types": "./src/index.d.ts",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/sdk.test.js test/portal.test.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "sdkMajor": 1,
+  "id": "ticket-tracker",
+  "version": "0.1.0",
+  "name": "Ticket tracker",
+  "description": "Track tickets shared by the members of one Workspace.",
+  "author": "Example application author",
+  "entrypoint": "index.html",
+  "permissions": ["identity.read", "data.read", "data.write"],
+  "entities": [
+    {
+      "entityType": "ticket",
+      "label": "Tickets",
+      "fields": [
+        {"name": "title", "label": "Title", "type": "string", "required": true},
+        {"name": "status", "label": "Status", "type": "enum", "enumValues": ["open", "closed"]}
+      ]
+    }
+  ],
+  "externalOrigins": []
+}
