@@ -1,7 +1,9 @@
 import { entityClient, fail, uuid } from "./internal.js";
 
 const TYPES = new Set(["string", "text", "date", "number", "integer", "boolean", "enum"]);
-const PERMISSIONS = new Set(["identity.read", "data.read", "data.write"]);
+// Device permissions (ADR 0093) are delegated by the portal; the simulator only accepts their declaration.
+const EXTERNAL_ORIGIN = /^https:\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9](?::[1-9][0-9]{0,4})?$/;
+const PERMISSIONS = new Set(["identity.read", "data.read", "data.write", "device.microphone", "device.camera", "device.screen", "clipboard.write"]);
 const MANIFEST_KEYS = new Set(["schemaVersion", "sdkMajor", "id", "version", "name", "description", "author", "entrypoint", "icon", "permissions", "entities", "externalOrigins"]);
 
 export function createSimulatedApp({ manifest, member = { id: 0, name: "Local member" }, workspace = { id: 0, name: "Local simulation" }, installationId = crypto.randomUUID() }) {
@@ -19,8 +21,15 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
   }
   const permissions = new Set(manifest.permissions ?? []);
   if (permissions.size !== (manifest.permissions?.length ?? 0) ||
-      [...permissions].some((permission) => !PERMISSIONS.has(permission)) || (manifest.externalOrigins?.length ?? 0)) {
+      [...permissions].some((permission) => !PERMISSIONS.has(permission))) {
     fail("MANIFEST_INVALID", "The static profile supports only identity and entity data.");
+  }
+  // ADR 0093: exact https origins an administrator approves. The simulator
+  // checks their shape only; it never contacts them on the application's behalf.
+  const origins = manifest.externalOrigins ?? [];
+  if (origins.length > 10 || new Set(origins).size !== origins.length ||
+      origins.some((origin) => typeof origin !== "string" || !EXTERNAL_ORIGIN.test(origin) || origin.endsWith(":443"))) {
+    fail("MANIFEST_INVALID", "External origins are exact lowercase https://host[:port] values.");
   }
   const entities = new Map();
   if ((manifest.entities?.length ?? 0) > 32 || Boolean(manifest.entities?.length) !==

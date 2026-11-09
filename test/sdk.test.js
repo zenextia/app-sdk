@@ -162,7 +162,21 @@ test("simulation enforces declared fields and permissions and freezes the contra
 test("simulation rejects unsupported contract majors and later delivery steps", () => {
   for (const change of [{ sdkMajor: 2 }, { schemaVersion: true }, { permissions: ["gmail.read"] },
                         { permissions: ["data.read", "data.read"] }, { serverFunctions: [] },
-                        { externalOrigins: ["https://external.example.com"] }]) {
+                        // ADR 0093 opened exact origins; a wildcard is still refused.
+                        { externalOrigins: ["https://*.example.com"] }]) {
     assert.throws(() => createSimulatedApp({ manifest: { ...manifest, ...change } }), errorCode("MANIFEST_INVALID"));
+  }
+});
+
+test("simulation accepts a declared device permission and still refuses unknown ones (ADR 0093)", () => {
+  const withDevices = { ...manifest, permissions: [...manifest.permissions, "device.microphone", "clipboard.write"] };
+  assert.equal(createSimulatedApp({ manifest: withDevices }).mode, "simulation");
+  assert.throws(() => createSimulatedApp({ manifest: { ...manifest, permissions: [...manifest.permissions, "device.geolocation"] } }));
+});
+
+test("simulation accepts exact https external origins and refuses anything looser (ADR 0093)", () => {
+  assert.equal(createSimulatedApp({ manifest: { ...manifest, externalOrigins: ["https://abc.supabase.co", "https://api.example.com:8443"] } }).mode, "simulation");
+  for (const origins of [["http://abc.example.com"], ["https://*.example.com"], ["https://example.com/"], ["https://example.com:443"], ["https://a.example.com", "https://a.example.com"]]) {
+    assert.throws(() => createSimulatedApp({ manifest: { ...manifest, externalOrigins: origins } }), undefined, origins.join(","));
   }
 });

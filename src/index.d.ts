@@ -1,4 +1,6 @@
-export type AppPermission = "identity.read" | "data.read" | "data.write";
+export type AppPermission =
+  | "identity.read" | "data.read" | "data.write"
+  | "device.microphone" | "device.camera" | "device.screen" | "clipboard.write";
 export type EntityFieldType = "string" | "text" | "number" | "integer" | "boolean" | "date" | "enum";
 export interface EntityField {
   name: string; label: string; type: EntityFieldType;
@@ -10,7 +12,8 @@ export interface AppManifest {
   entrypoint?: string; icon?: string | null;
   permissions?: readonly AppPermission[];
   entities?: readonly { entityType: string; label: string; fields: readonly EntityField[] }[];
-  externalOrigins?: readonly never[];
+  /** Exact https origins the administrator approves (ADR 0093). */
+  externalOrigins?: readonly string[];
 }
 export interface AppIdentity {
   member: { id: number; name: string | null };

@@ -60,6 +60,16 @@ Permissions and record types live in the application's `zenextia.app.json`:
 | `identity.read` | Show the current member's and Workspace's names (never their email). |
 | `data.read` | List and read its records. |
 | `data.write` | Create, replace and delete its records. |
+| `device.microphone` | Record audio (`getUserMedia({ audio: true })`). |
+| `device.camera` | Take photos or video (`getUserMedia({ video: true })`). |
+| `device.screen` | Capture the screen or a tab (`getDisplayMedia()`). |
+| `clipboard.write` | Copy to the clipboard (`navigator.clipboard.write*`). |
+
+`externalOrigins` lists up to 10 exact `https://host[:port]` origins (no path
+or wildcard) that the application calls, for example a Supabase project. Once
+an administrator approves them, `fetch`, XHR and WebSockets (`wss:`) may reach
+them; data sent there leaves Zenextia. Workers, WebAssembly, downloads after a
+click and `window.print()` need no declaration.
 
 Request only what you use: a Workspace administrator reviews the request and
 may grant less. Data permissions require `entities`, and `entities` require a
