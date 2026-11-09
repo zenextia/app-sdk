@@ -1,4 +1,4 @@
-import { createAppClient, createSimulatedApp, type AppManifest, type DataRecord } from "@zenextia/app-sdk";
+import { createAppClient, createSimulatedApp, verifyIdentityToken, type AppManifest, type DataRecord, type IdentityToken } from "@zenextia/app-sdk";
 
 interface Ticket { title: string; status?: "open" | "closed" }
 const app = createAppClient({
@@ -15,3 +15,10 @@ declare const manifest: AppManifest;
 const simulated = createSimulatedApp({ manifest });
 const mode: "live" | "simulation" = simulated.mode;
 void mode;
+const proof: IdentityToken = await app.identity.token("https://api.example.org");
+const verified = await verifyIdentityToken({
+  apiOrigin: "https://api.example.com", installationId: "00000000-0000-0000-0000-000000000001",
+  audience: "https://api.example.org", token: proof.token,
+});
+const memberId: number | undefined = verified?.member.id;
+void memberId;

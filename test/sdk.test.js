@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { createAppClient, createSimulatedApp, ZenextiaAppError } from "@zenextia/app-sdk";
+import { createAppClient, createSimulatedApp, verifyIdentityToken, ZenextiaAppError } from "@zenextia/app-sdk";
 
 const manifest = JSON.parse(await readFile(new URL("./fixtures/zenextia.app.json", import.meta.url), "utf8"));
 const installationId = "00000000-0000-0000-0000-000000000001";
@@ -179,4 +179,51 @@ test("simulation accepts exact https external origins and refuses anything loose
   for (const origins of [["http://abc.example.com"], ["https://*.example.com"], ["https://example.com/"], ["https://example.com:443"], ["https://a.example.com", "https://a.example.com"]]) {
     assert.throws(() => createSimulatedApp({ manifest: { ...manifest, externalOrigins: origins } }), undefined, origins.join(","));
   }
+});
+
+test("an identity token names one approved back-end (ADR 0094)", async () => {
+  const calls = [];
+  const app = createAppClient({ ...options, fetch: async (url, init) => {
+    calls.push({ url, init });
+    return ok({ token: "zaf_i_x", tokenType: "ZenextiaIdentity", audience: "https://api.example.org", expiresIn: 300 });
+  } });
+  assert.equal((await app.identity.token("https://api.example.org")).expiresIn, 300);
+  assert.equal(calls[0].url, `https://api.example.com/ai-factory/runtime/${installationId}/identity/token`);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${token}`);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { audience: "https://api.example.org" });
+  for (const audience of ["https://api.example.org/", "http://api.example.org", "https://*.example.org", "https://api.example.org:443", undefined]) {
+    await assert.rejects(app.identity.token(audience), errorCode("AI_FACTORY_INPUT_INVALID"), String(audience));
+  }
+  assert.equal(calls.length, 1);
+});
+
+test("a back-end has Zenextia check an identity token and gets null when it is not valid", async () => {
+  const identityToken = "zaf_i_" + "a".repeat(20) + "." + "b".repeat(43);
+  const verified = { active: true, member: { id: 42, name: "Member" }, workspace: { id: 7, name: "Workspace" } };
+  const seen = [];
+  const answer = (data) => async (url, init) => { seen.push({ url, init }); return ok(data); };
+  const input = { apiOrigin: "https://api.example.com", installationId, audience: "https://api.example.org", token: identityToken };
+  assert.deepEqual(await verifyIdentityToken({ ...input, fetch: answer(verified) }), verified);
+  assert.equal(seen[0].url, `https://api.example.com/ai-factory/runtime/${installationId}/identity/introspect`);
+  assert.deepEqual(JSON.parse(seen[0].init.body), { token: identityToken, audience: "https://api.example.org" });
+  assert.equal(seen[0].init.headers.Authorization, undefined);
+  assert.equal(await verifyIdentityToken({ ...input, fetch: answer({ active: false }) }), null);
+  assert.equal(await verifyIdentityToken({ ...input, token: "zaf_s_" + "a".repeat(43), fetch: async () => assert.fail("Must not fetch") }), null);
+  await assert.rejects(verifyIdentityToken({ ...input, fetch: async () => Response.json(
+    { error: { code: "AI_FACTORY_QUOTA_EXCEEDED", message: "Budget", requestId: "req-1" } }, { status: 429 }) }),
+  (error) => errorCode("AI_FACTORY_QUOTA_EXCEEDED")(error) && error.status === 429 && error.requestId === "req-1");
+  await assert.rejects(verifyIdentityToken({ ...input, audience: "https://api.example.org/", fetch: answer(verified) }), errorCode("AI_FACTORY_INPUT_INVALID"));
+  await assert.rejects(verifyIdentityToken({ ...input, apiOrigin: "http://api.example.com", fetch: answer(verified) }), errorCode("AI_FACTORY_INPUT_INVALID"));
+});
+
+test("simulated identity tokens follow the manifest and never pass a real check", async () => {
+  const app = createSimulatedApp({ manifest: { ...manifest, externalOrigins: ["https://api.example.org"] } });
+  const issued = await app.identity.token("https://api.example.org");
+  assert.equal(issued.audience, "https://api.example.org");
+  await assert.rejects(app.identity.token("https://other.example.org"), errorCode("AI_FACTORY_IDENTITY_AUDIENCE_DENIED"));
+  assert.equal(await verifyIdentityToken({ apiOrigin: "https://api.example.com", installationId,
+    audience: "https://api.example.org", token: issued.token, fetch: async () => assert.fail("Must not fetch") }), null);
+  const withoutIdentity = createSimulatedApp({ manifest: { ...manifest, permissions: ["data.read"], externalOrigins: ["https://api.example.org"] } });
+  await assert.rejects(withoutIdentity.identity.token("https://api.example.org"), errorCode("AI_FACTORY_PERMISSION_DENIED"));
 });

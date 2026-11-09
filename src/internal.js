@@ -19,6 +19,30 @@ export function uuid(value) {
   return value.toLowerCase();
 }
 
+export function apiBase(apiOrigin) {
+  try {
+    const base = new URL(apiOrigin);
+    if (base.protocol !== "https:" || base.username || base.password || base.pathname !== "/" || base.search || base.hash) throw new TypeError();
+    return base.origin;
+  } catch {
+    fail("AI_FACTORY_INPUT_INVALID", "Expected the HTTPS platform API origin.");
+  }
+}
+
+// ADR 0093: an exact lowercase https origin, with no path, wildcard or default port.
+const EXTERNAL_ORIGIN = /^https:\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9](?::[1-9][0-9]{0,4})?$/;
+
+export function isExternalOrigin(value) {
+  if (typeof value !== "string" || value.length > 253 || !EXTERNAL_ORIGIN.test(value)) return false;
+  const port = /:(\d+)$/.exec(value)?.[1];
+  return port === undefined || (port !== "443" && Number(port) <= 65535);
+}
+
+export function externalOrigin(value) {
+  if (!isExternalOrigin(value)) fail("AI_FACTORY_INPUT_INVALID", "Expected an exact https origin from externalOrigins.");
+  return value;
+}
+
 export function entityName(value) {
   if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value)) {
     fail("AI_FACTORY_INPUT_INVALID", "Expected a declared entity name.");

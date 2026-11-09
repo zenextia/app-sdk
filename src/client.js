@@ -1,18 +1,12 @@
-import { entityClient, fail, uuid, ZenextiaAppError } from "./internal.js";
+import { apiBase, entityClient, externalOrigin, fail, uuid, ZenextiaAppError } from "./internal.js";
 
 export function createAppClient({ apiOrigin, installationId, accessToken, fetch: fetcher = globalThis.fetch }) {
   installationId = uuid(installationId);
-  let base;
-  try {
-    base = new URL(apiOrigin);
-    if (base.protocol !== "https:" || base.username || base.password || base.pathname !== "/" || base.search || base.hash) throw new TypeError();
-  } catch {
-    fail("AI_FACTORY_INPUT_INVALID", "Expected the HTTPS platform API origin.");
-  }
+  const base = apiBase(apiOrigin);
   if (typeof fetcher !== "function" || !["string", "function"].includes(typeof accessToken)) {
     fail("AI_FACTORY_INPUT_INVALID", "A fetch implementation and application access token are required.");
   }
-  const root = `${base.origin}/ai-factory/runtime/${installationId}`;
+  const root = `${base}/ai-factory/runtime/${installationId}`;
   let closed = false;
 
   async function request(path, method = "GET", body) {
@@ -70,7 +64,11 @@ export function createAppClient({ apiOrigin, installationId, accessToken, fetch:
 
   return Object.freeze({
     mode: "live",
-    identity: Object.freeze({ get: () => request("/identity") }),
+    identity: Object.freeze({
+      get: () => request("/identity"),
+      // ADR 0094: a five-minute proof of the member for one approved back-end.
+      token: async (audience) => request("/identity/token", "POST", { audience: externalOrigin(audience) }),
+    }),
     data: Object.freeze({ entity: (name) => entityClient(name, execute) }),
     session: Object.freeze({ revoke: async () => { await request("/session", "DELETE"); closed = true; } }),
   });

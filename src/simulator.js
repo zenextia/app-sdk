@@ -1,8 +1,7 @@
-import { entityClient, fail, uuid } from "./internal.js";
+import { entityClient, fail, isExternalOrigin, uuid } from "./internal.js";
 
 const TYPES = new Set(["string", "text", "date", "number", "integer", "boolean", "enum"]);
 // Device permissions (ADR 0093) are delegated by the portal; the simulator only accepts their declaration.
-const EXTERNAL_ORIGIN = /^https:\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9](?::[1-9][0-9]{0,4})?$/;
 const PERMISSIONS = new Set(["identity.read", "data.read", "data.write", "device.microphone", "device.camera", "device.screen", "clipboard.write"]);
 const MANIFEST_KEYS = new Set(["schemaVersion", "sdkMajor", "id", "version", "name", "description", "author", "entrypoint", "icon", "permissions", "entities", "externalOrigins"]);
 
@@ -28,7 +27,7 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
   // checks their shape only; it never contacts them on the application's behalf.
   const origins = manifest.externalOrigins ?? [];
   if (origins.length > 10 || new Set(origins).size !== origins.length ||
-      origins.some((origin) => typeof origin !== "string" || !EXTERNAL_ORIGIN.test(origin) || origin.endsWith(":443"))) {
+      origins.some((origin) => !isExternalOrigin(origin))) {
     fail("MANIFEST_INVALID", "External origins are exact lowercase https://host[:port] values.");
   }
   const entities = new Map();
@@ -112,10 +111,20 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
 
   return Object.freeze({
     mode: "simulation",
-    identity: Object.freeze({ get: async () => {
-      requirePermission("identity.read");
-      return structuredClone({ member, workspace, installation: { id: installationId, version: manifest.version } });
-    } }),
+    identity: Object.freeze({
+      get: async () => {
+        requirePermission("identity.read");
+        return structuredClone({ member, workspace, installation: { id: installationId, version: manifest.version } });
+      },
+      token: async (audience) => {
+        requirePermission("identity.read");
+        if (!isExternalOrigin(audience) || !origins.includes(audience)) {
+          fail("AI_FACTORY_IDENTITY_AUDIENCE_DENIED", "Identity tokens name one of the manifest's externalOrigins.", 403);
+        }
+        // Zenextia never vouches for a simulated token: verifyIdentityToken returns null for it.
+        return { token: `zaf_i_simulated.${crypto.randomUUID()}`, tokenType: "ZenextiaIdentity", audience, expiresIn: 300 };
+      },
+    }),
     data: Object.freeze({ entity: (name) => entityClient(name, execute) }),
     session: Object.freeze({ revoke: async () => { closed = true; } }),
   });

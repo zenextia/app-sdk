@@ -20,6 +20,17 @@ export interface AppIdentity {
   workspace: { id: number; name: string | null };
   installation: { id: string; version: string };
 }
+/** A five-minute proof of the member for one approved back-end (ADR 0094). */
+export interface IdentityToken {
+  token: string; tokenType: "ZenextiaIdentity"; audience: string; expiresIn: number;
+}
+/** What Zenextia vouches for when a back-end checks an identity token. */
+export interface VerifiedIdentity {
+  active: true; audience: string; expiresAt: string;
+  installationId: string; versionId: string; preview: boolean; appOrigin: string;
+  member: { id: number; name: string | null };
+  workspace: { id: number; name: string | null };
+}
 export interface DataRecord<T extends object = Record<string, unknown>> {
   id: string; data: T; revision: number; schemaVersionId: string;
   createdAt: string; updatedAt: string;
@@ -36,7 +47,11 @@ export interface EntityClient<T extends object> {
 }
 export interface AppClient {
   readonly mode: "live" | "simulation";
-  readonly identity: { get(): Promise<AppIdentity> };
+  readonly identity: {
+    get(): Promise<AppIdentity>;
+    /** Needs identity.read; `audience` is one of the approved externalOrigins. */
+    token(audience: string): Promise<IdentityToken>;
+  };
   readonly data: { entity<T extends object = Record<string, unknown>>(name: string): EntityClient<T> };
   readonly session: { revoke(): Promise<void> };
 }
@@ -49,6 +64,11 @@ export function createAppClient(options: {
   accessToken: string | (() => string | Promise<string>); fetch?: typeof globalThis.fetch;
 }): AppClient;
 export function connectToPortal(): Promise<AppClient>;
+/** On the author's back-end: has Zenextia check an identity token; null when it is not valid. */
+export function verifyIdentityToken(options: {
+  apiOrigin: string; installationId: string; audience: string; token: string;
+  fetch?: typeof globalThis.fetch;
+}): Promise<VerifiedIdentity | null>;
 export function createSimulatedApp(options: {
   manifest: AppManifest; installationId?: string;
   member?: AppIdentity["member"]; workspace?: AppIdentity["workspace"];

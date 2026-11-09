@@ -23,6 +23,8 @@ npm install @zenextia/app-sdk
    `app.identity.get()` et `app.data.entity("nom").list/get/create/replace/delete`.
 3. Pendant le développement, hors de Zenextia, utilisez
    `createSimulatedApp({ manifest })` : mêmes appels, données en mémoire.
+   Un back-end à vous ? `app.identity.token(...)` côté application et
+   `verifyIdentityToken(...)` côté serveur (section « Your own back-end »).
 4. Envoyez l'application avec `npx @zenextia/cli deploy`. Un administrateur de
    l'espace valide ensuite les permissions demandées.
 
@@ -95,6 +97,51 @@ await tickets.delete(updated.id, updated.revision);
 `connectToPortal()` works only in an application opened from Zenextia; it
 fails with `AI_FACTORY_BRIDGE_REQUIRED` anywhere else. Show that error: do not
 fall back silently to the simulator.
+
+## Your own back-end
+
+Zenextia runs no server code for your application. When it needs a back-end
+(a secret key, a database, webhooks), host it yourself, for example on
+Supabase or a Node.js server, and list its exact origin in `externalOrigins`.
+The application tells it who is calling with a five-minute identity token. It
+needs the `identity.read` permission:
+
+```js
+const { token } = await app.identity.token("https://api.example.com");
+const response = await fetch("https://api.example.com/orders", {
+  headers: { Authorization: `Bearer ${token}` },
+});
+```
+
+The back-end has Zenextia check the token before answering:
+
+```js
+import { verifyIdentityToken } from "@zenextia/app-sdk";
+
+const identity = await verifyIdentityToken({
+  apiOrigin: "https://api.zenextia.com",
+  installationId: "<the installationId printed by zenextia deploy>",
+  audience: "https://api.example.com", // this back-end's own origin
+  token: request.headers.get("authorization")?.replace(/^Bearer /, ""),
+});
+if (!identity) return new Response(null, { status: 401 });
+// identity.member.id, identity.workspace.id, identity.preview
+```
+
+- The token names one approved origin, lives five minutes (`expiresIn`) and
+  grants no access to Zenextia data. Ask for a new one when it expires.
+- Zenextia rechecks the member, their role and the approvals on every check:
+  a removed member stops getting through at once. Pin the installation IDs
+  your back-end serves.
+- Without Node.js, POST `{"token", "audience"}` as JSON to
+  `https://api.zenextia.com/ai-factory/runtime/<installationId>/identity/introspect`.
+  The answer's `data` is `{"active": false}`, or the member, the Workspace and
+  the version.
+- CORS: allow the application's origin, or any origin, with the
+  `Authorization` and `Content-Type` headers; the token protects each call. Do
+  not rely on cookies: browsers block another site's cookies inside the frame.
+  Sign-in pages (Google, Microsoft) cannot open in the frame either.
+- Tokens from the simulator never pass this check.
 
 ## While developing
 
