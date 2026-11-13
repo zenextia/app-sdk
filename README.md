@@ -25,6 +25,8 @@ npm install @zenextia/app-sdk
    `createSimulatedApp({ manifest })` : mêmes appels, données en mémoire.
    Un back-end à vous ? `app.identity.token(...)` côté application et
    `verifyIdentityToken(...)` côté serveur (section « Your own back-end »).
+   Des actions que l'assistant Zenextia peut lancer pour un membre ? Déclarez
+   des `tools` (section « Tools the assistant can call »).
 4. Envoyez l'application avec `npx @zenextia/cli deploy`. Un administrateur de
    l'espace valide ensuite les permissions demandées.
 
@@ -142,6 +144,92 @@ if (!identity) return new Response(null, { status: 401 });
   not rely on cookies: browsers block another site's cookies inside the frame.
   Sign-in pages (Google, Microsoft) cannot open in the frame either.
 - Tokens from the simulator never pass this check.
+
+## Tools the assistant can call
+
+An application can publish tools: actions the Zenextia assistant, or a
+member's own agent connected to Zenextia, runs for a member who asks in plain
+words ("file this invoice in the subscriptions application"). Declare them in
+`zenextia.app.json`:
+
+```json
+"tools": [
+  {
+    "name": "list_tickets",
+    "description": "List the tickets of the Workspace.",
+    "mode": "read",
+    "target": { "type": "records", "entityType": "ticket", "operation": "list" }
+  },
+  {
+    "name": "file_invoice",
+    "description": "File an invoice against a subscription.",
+    "mode": "write",
+    "input": [
+      { "name": "supplier", "label": "Supplier", "type": "string", "required": true },
+      { "name": "amount", "label": "Amount incl. tax", "type": "number", "required": true },
+      { "name": "invoice", "label": "Invoice (PDF)", "type": "file" }
+    ],
+    "target": { "type": "endpoint", "url": "https://api.example.com/tools/file-invoice" }
+  }
+]
+```
+
+- Up to 20 tools. `name` is lowercase letters, digits and underscores (at most
+  48). `description` is what the assistant and the administrator read: say
+  what the tool does and when to use it.
+- `mode` is `read` or `write`. A read answers at once. A write is shown to the
+  member as a card with the exact values, and runs only when they approve it.
+- A `records` target runs `list`, `get`, `create` or `replace` on one of your
+  `entities`. It needs `data.read` or `data.write` and declares no `input`:
+  the entity's fields are its parameters.
+- An `endpoint` target is a route of your own back-end. Its origin must be in
+  `externalOrigins`, and it needs `identity.read`. `input` lists up to 30
+  parameters: the field types, plus `file` for one document the member can
+  read in Zenextia; `multiple: true` makes a list (not for `file`).
+- An administrator approves each tool, version by version. A tool is offered
+  only to members whose role opens the application with the matching read or
+  write right.
+
+Zenextia calls an `endpoint` tool from its servers, for one member:
+
+```http
+POST https://api.example.com/tools/file-invoice
+Authorization: Bearer zaf_i_...
+Idempotency-Key: action:5f0c...
+X-Zenextia-Tool: file_invoice
+X-Zenextia-Call: 0b9e...
+
+{ "tool": "file_invoice", "callId": "0b9e...",
+  "input": { "supplier": "LinkedIn", "amount": 40 },
+  "files": { "invoice": { "name": "invoice.pdf", "contentType": "application/pdf", "size": 48211, "base64": "..." } } }
+```
+
+The route checks who the call is for, exactly as for the application's own
+requests, and asks for this tool by name:
+
+```js
+const identity = await verifyIdentityToken({
+  apiOrigin: "https://api.zenextia.com",
+  installationId: "<the installationId printed by zenextia deploy>",
+  audience: "https://api.example.com",
+  token: request.headers.get("authorization")?.replace(/^Bearer /, ""),
+  tool: "file_invoice", // any token that is not a call of this tool gives null
+});
+if (!identity) return new Response(null, { status: 401 });
+// identity.member.id, identity.workspace.id, identity.tool.callId
+```
+
+- Always check the token, then apply your own rules to `identity.member` and
+  `identity.workspace`. Never trust a member or Workspace found in `input`.
+- The token is for this tool and this call, lives five minutes and is accepted
+  **once**: check it once per request and keep the result.
+- `Idempotency-Key` is the same on every attempt of one approved write. Store
+  it and answer a repeat without doing the work twice.
+- Answer with JSON, 256 KB at most, within 30 seconds. The request is 10 MB at
+  most, files included (7 MB per file). A non-2xx status is reported to the
+  member as a failure.
+- What you answer is read by the assistant as data. It is not followed as
+  instructions.
 
 ## While developing
 

@@ -176,6 +176,12 @@ test("simulation accepts a declared device permission and still refuses unknown 
 
 test("simulation accepts exact https external origins and refuses anything looser (ADR 0093)", () => {
   assert.equal(createSimulatedApp({ manifest: { ...manifest, externalOrigins: ["https://abc.supabase.co", "https://api.example.com:8443"] } }).mode, "simulation");
+  // ADR 0100: a manifest may declare tools; the simulator checks their shape only.
+  const tool = { name: "lister", description: "TEST", mode: "read", target: { type: "records", entityType: "ticket", operation: "list" } };
+  assert.equal(createSimulatedApp({ manifest: { ...manifest, tools: [tool] } }).mode, "simulation");
+  for (const tools of [[tool, tool], [{ ...tool, name: "Bad" }], [{ ...tool, target: { type: "shell" } }], "lister"]) {
+    assert.throws(() => createSimulatedApp({ manifest: { ...manifest, tools } }));
+  }
   for (const origins of [["http://abc.example.com"], ["https://*.example.com"], ["https://example.com/"], ["https://example.com:443"], ["https://a.example.com", "https://a.example.com"]]) {
     assert.throws(() => createSimulatedApp({ manifest: { ...manifest, externalOrigins: origins } }), undefined, origins.join(","));
   }
@@ -215,6 +221,21 @@ test("a back-end has Zenextia check an identity token and gets null when it is n
   (error) => errorCode("AI_FACTORY_QUOTA_EXCEEDED")(error) && error.status === 429 && error.requestId === "req-1");
   await assert.rejects(verifyIdentityToken({ ...input, audience: "https://api.example.org/", fetch: answer(verified) }), errorCode("AI_FACTORY_INPUT_INVALID"));
   await assert.rejects(verifyIdentityToken({ ...input, apiOrigin: "http://api.example.com", fetch: answer(verified) }), errorCode("AI_FACTORY_INPUT_INVALID"));
+});
+
+test("a tool route accepts only the call Zenextia makes for that tool", async () => {
+  const identityToken = "zaf_i_" + "a".repeat(20) + "." + "b".repeat(43);
+  const member = { active: true, member: { id: 42, name: "Member" }, workspace: { id: 7, name: "Workspace" } };
+  const call = { ...member, tool: { name: "deposer_facture", mode: "write", callId: "00000000-0000-4000-8000-000000000001" } };
+  const input = { apiOrigin: "https://api.example.com", installationId, audience: "https://api.example.org", token: identityToken };
+  const answer = (data) => async () => ok(data);
+  assert.deepEqual(await verifyIdentityToken({ ...input, tool: "deposer_facture", fetch: answer(call) }), call);
+  // The application's own token, or another tool's, does not open a tool route.
+  assert.equal(await verifyIdentityToken({ ...input, tool: "deposer_facture", fetch: answer(member) }), null);
+  assert.equal(await verifyIdentityToken({ ...input, tool: "lister_factures", fetch: answer(call) }), null);
+  // Without `tool`, the caller reads the claim and decides.
+  assert.equal((await verifyIdentityToken({ ...input, fetch: answer(call) })).tool.name, "deposer_facture");
+  await assert.rejects(verifyIdentityToken({ ...input, tool: "Deposer Facture", fetch: answer(call) }), errorCode("AI_FACTORY_INPUT_INVALID"));
 });
 
 test("simulated identity tokens follow the manifest and never pass a real check", async () => {

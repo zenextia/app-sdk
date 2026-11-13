@@ -22,3 +22,9 @@ const verified = await verifyIdentityToken({
 });
 const memberId: number | undefined = verified?.member.id;
 void memberId;
+const toolCall = await verifyIdentityToken({
+  apiOrigin: "https://api.example.com", installationId: "00000000-0000-0000-0000-000000000001",
+  audience: "https://api.example.org", token: proof.token, tool: "deposer_facture",
+});
+const callId: string | undefined = toolCall?.tool?.callId;
+void callId;
