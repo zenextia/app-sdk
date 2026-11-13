@@ -187,6 +187,64 @@ test("simulation accepts exact https external origins and refuses anything loose
   }
 });
 
+test("a file is sent as a multipart form and read back as bytes (ADR 0101)", async () => {
+  const fileId = "00000000-0000-4000-8000-0000000000aa";
+  const reference = { fileId, name: "TEST facture.pdf", contentType: "application/pdf", size: 9 };
+  const calls = [];
+  const app = createAppClient({ ...options, fetch: async (url, init) => {
+    calls.push({ url, init });
+    return init.method === "POST" ? Response.json({ data: reference }, { status: 201 })
+      : new Response("%PDF-TEST", { headers: { "content-type": "application/pdf" } });
+  } });
+  const pdf = new Blob(["%PDF-TEST"], { type: "application/pdf" });
+  assert.deepEqual(await app.files.upload(pdf, { name: "TEST facture.pdf" }), reference);
+  const sent = calls[0];
+  assert.equal(sent.url, `https://api.example.com/ai-factory/runtime/${installationId}/files`);
+  assert.ok(sent.init.body instanceof FormData);
+  assert.equal(sent.init.body.get("file").name, "TEST facture.pdf");
+  // The browser writes the multipart boundary: no Content-Type is set by hand.
+  assert.deepEqual(Object.keys(sent.init.headers).sort(), ["Accept", "Authorization"]);
+  assert.equal(sent.init.credentials, "omit");
+  assert.equal(await (await app.files.download(fileId)).text(), "%PDF-TEST");
+  assert.equal(calls[1].url, `https://api.example.com/ai-factory/runtime/${installationId}/files/${fileId}`);
+  // Refused before any request: not a Blob, empty, too large, a bad identifier.
+  await assert.rejects(app.files.upload("text"), errorCode("AI_FACTORY_FILE_INVALID"));
+  await assert.rejects(app.files.upload(new Blob([])), errorCode("AI_FACTORY_FILE_EMPTY"));
+  await assert.rejects(app.files.upload(new Blob([new Uint8Array(8 * 1024 * 1024 + 1)])), errorCode("AI_FACTORY_FILE_TOO_LARGE"));
+  await assert.rejects(app.files.download("../identity"), errorCode("AI_FACTORY_INPUT_INVALID"));
+  assert.equal(calls.length, 2);
+  const refusing = createAppClient({ ...options, fetch: async () => Response.json(
+    { error: { code: "AI_FACTORY_QUOTA_EXCEEDED", message: "Quota", requestId: "req-9" } }, { status: 429 }) });
+  await assert.rejects(refusing.files.upload(pdf), (error) => errorCode("AI_FACTORY_QUOTA_EXCEEDED")(error) && error.status === 429 && error.requestId === "req-9");
+  const offline = createAppClient({ ...options, fetch: async () => { throw new TypeError("offline"); } });
+  await assert.rejects(offline.files.upload(pdf), errorCode("AI_FACTORY_NETWORK_ERROR"));
+});
+
+test("simulated files belong to one record and go with it (ADR 0101)", async () => {
+  const withFile = { ...manifest, entities: [{ ...manifest.entities[0], fields: [
+    ...manifest.entities[0].fields, { name: "piece", label: "Pièce jointe", type: "file" }] }] };
+  const app = createSimulatedApp({ manifest: withFile });
+  const tickets = app.data.entity("ticket");
+  const reference = await app.files.upload(new Blob(["%PDF-TEST"], { type: "application/pdf" }), { name: "TEST.pdf" });
+  assert.deepEqual({ name: reference.name, contentType: reference.contentType, size: reference.size },
+    { name: "TEST.pdf", contentType: "application/pdf", size: 9 });
+  const record = await tickets.create({ title: "TEST", piece: { fileId: reference.fileId, name: "other.exe" } });
+  assert.deepEqual(record.data.piece, reference);
+  await assert.rejects(tickets.create({ title: "TEST 2", piece: { fileId: reference.fileId } }), errorCode("AI_FACTORY_FILE_NOT_AVAILABLE"));
+  await assert.rejects(tickets.create({ title: "TEST 3", piece: "TEST.pdf" }), errorCode("AI_FACTORY_ENTITY_INVALID"));
+  assert.equal(await (await app.files.download(reference.fileId)).text(), "%PDF-TEST");
+  // Keeping the reference keeps the file; dropping the field removes it.
+  const kept = await tickets.replace(record.id, { title: "TEST v2", piece: record.data.piece }, 1);
+  assert.equal(await (await app.files.download(reference.fileId)).text(), "%PDF-TEST");
+  await tickets.replace(record.id, { title: "TEST v3" }, kept.revision);
+  await assert.rejects(app.files.download(reference.fileId), errorCode("AI_FACTORY_FILE_NOT_FOUND"));
+  // A manifest with no file field keeps no file; six file fields are refused.
+  await assert.rejects(createSimulatedApp({ manifest }).files.upload(new Blob(["x"])), errorCode("AI_FACTORY_FILES_NOT_DECLARED"));
+  const six = { ...manifest, entities: [{ ...manifest.entities[0], fields: [...manifest.entities[0].fields,
+    ...[1, 2, 3, 4, 5, 6].map((index) => ({ name: `f${index}`, label: "TEST", type: "file" }))] }] };
+  assert.throws(() => createSimulatedApp({ manifest: six }), errorCode("MANIFEST_INVALID"));
+});
+
 test("an identity token names one approved back-end (ADR 0094)", async () => {
   const calls = [];
   const app = createAppClient({ ...options, fetch: async (url, init) => {

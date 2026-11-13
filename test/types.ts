@@ -15,6 +15,10 @@ declare const manifest: AppManifest;
 const simulated = createSimulatedApp({ manifest });
 const mode: "live" | "simulation" = simulated.mode;
 void mode;
+const kept = await app.files.upload(new Blob(["TEST"]), { name: "TEST.txt" });
+const keptId: string = kept.fileId;
+const bytes: Blob = await app.files.download(keptId);
+void bytes;
 const proof: IdentityToken = await app.identity.token("https://api.example.org");
 const verified = await verifyIdentityToken({
   apiOrigin: "https://api.example.com", installationId: "00000000-0000-0000-0000-000000000001",

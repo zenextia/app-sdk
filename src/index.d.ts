@@ -1,7 +1,9 @@
 export type AppPermission =
   | "identity.read" | "data.read" | "data.write"
   | "device.microphone" | "device.camera" | "device.screen" | "clipboard.write";
-export type EntityFieldType = "string" | "text" | "number" | "integer" | "boolean" | "date" | "enum";
+export type EntityFieldType = "string" | "text" | "number" | "integer" | "boolean" | "date" | "enum" | "file";
+/** What a record holds for a `file` field (ADR 0101). To write one, `{ fileId }` is enough. */
+export interface FileReference { fileId: string; name: string; contentType: string; size: number }
 export interface EntityField {
   name: string; label: string; type: EntityFieldType;
   required?: boolean; enumValues?: readonly string[];
@@ -69,6 +71,13 @@ export interface AppClient {
     token(audience: string): Promise<IdentityToken>;
   };
   readonly data: { entity<T extends object = Record<string, unknown>>(name: string): EntityClient<T> };
+  /** Files kept by Zenextia for a record's `file` field: 8 MB at most, held by one record. */
+  readonly files: {
+    /** Needs data.write. The reference goes in a record; an upload no record takes is removed after a day. */
+    upload(blob: Blob, options?: { name?: string }): Promise<FileReference>;
+    /** Needs data.read. */
+    download(fileId: string): Promise<Blob>;
+  };
   readonly session: { revoke(): Promise<void> };
 }
 export class ZenextiaAppError extends Error {
