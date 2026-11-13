@@ -185,7 +185,9 @@ words ("file this invoice in the subscriptions application"). Declare them in
 - An `endpoint` target is a route of your own back-end. Its origin must be in
   `externalOrigins`, and it needs `identity.read`. `input` lists up to 30
   parameters: the field types, plus `file` for one document the member can
-  read in Zenextia; `multiple: true` makes a list (not for `file`).
+  read in Zenextia (a Documents file, a file attached to the conversation, or
+  an attachment of a message in their own Gmail or Outlook mailbox);
+  `multiple: true` makes a list (not for `file`).
 - An administrator approves each tool, version by version. A tool is offered
   only to members whose role opens the application with the matching read or
   write right.
@@ -225,9 +227,12 @@ if (!identity) return new Response(null, { status: 401 });
   **once**: check it once per request and keep the result.
 - `Idempotency-Key` is the same on every attempt of one approved write. Store
   it and answer a repeat without doing the work twice.
-- Answer with JSON, 256 KB at most, within 30 seconds. The request is 10 MB at
-  most, files included (7 MB per file). A non-2xx status is reported to the
-  member as a failure.
+- Answer with JSON, 256 KB at most and not compressed (Zenextia sends
+  `Accept-Encoding: identity`), within 30 seconds for the whole exchange. The
+  request is 10 MB at most, files included (7 MB per file). A non-2xx status
+  is reported to the member as a failure.
+- A tool always waits for the member: it cannot be run by an unattended
+  automation.
 - What you answer is read by the assistant as data. It is not followed as
   instructions.
 
