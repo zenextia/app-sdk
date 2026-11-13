@@ -14,6 +14,20 @@ export interface AppManifest {
   entities?: readonly { entityType: string; label: string; fields: readonly EntityField[] }[];
   /** Exact https origins the administrator approves (ADR 0093). */
   externalOrigins?: readonly string[];
+  /** Tools the assistant may call for a member, once an administrator approved them (ADR 0100). */
+  tools?: readonly AppTool[];
+}
+export interface AppToolParameter {
+  name: string; label: string;
+  type: "string" | "text" | "number" | "integer" | "boolean" | "date" | "enum" | "file";
+  description?: string; required?: boolean; multiple?: boolean; enumValues?: readonly string[];
+}
+export interface AppTool {
+  name: string; description: string; mode: "read" | "write";
+  input?: readonly AppToolParameter[];
+  target:
+    | { type: "records"; entityType: string; operation: "list" | "get" | "create" | "replace" }
+    | { type: "endpoint"; url: string };
 }
 export interface AppIdentity {
   member: { id: number; name: string | null };
@@ -30,6 +44,8 @@ export interface VerifiedIdentity {
   installationId: string; versionId: string; preview: boolean; appOrigin: string;
   member: { id: number; name: string | null };
   workspace: { id: number; name: string | null };
+  /** Present when Zenextia calls a tool's endpoint for the member (ADR 0100). */
+  tool?: { name: string; mode: "read" | "write"; callId: string };
 }
 export interface DataRecord<T extends object = Record<string, unknown>> {
   id: string; data: T; revision: number; schemaVersionId: string;
@@ -67,6 +83,8 @@ export function connectToPortal(): Promise<AppClient>;
 /** On the author's back-end: has Zenextia check an identity token; null when it is not valid. */
 export function verifyIdentityToken(options: {
   apiOrigin: string; installationId: string; audience: string; token: string;
+  /** On a route that serves a tool: accept only a call Zenextia makes for that tool. */
+  tool?: string;
   fetch?: typeof globalThis.fetch;
 }): Promise<VerifiedIdentity | null>;
 export function createSimulatedApp(options: {

@@ -1,6 +1,6 @@
 {
   "name": "@zenextia/app-sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Identity and shared data for applications published on Zenextia.",
   "keywords": [
     "zenextia",

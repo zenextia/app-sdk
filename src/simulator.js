@@ -3,7 +3,8 @@ import { entityClient, fail, isExternalOrigin, uuid } from "./internal.js";
 const TYPES = new Set(["string", "text", "date", "number", "integer", "boolean", "enum"]);
 // Device permissions (ADR 0093) are delegated by the portal; the simulator only accepts their declaration.
 const PERMISSIONS = new Set(["identity.read", "data.read", "data.write", "device.microphone", "device.camera", "device.screen", "clipboard.write"]);
-const MANIFEST_KEYS = new Set(["schemaVersion", "sdkMajor", "id", "version", "name", "description", "author", "entrypoint", "icon", "permissions", "entities", "externalOrigins"]);
+const MANIFEST_KEYS = new Set(["schemaVersion", "sdkMajor", "id", "version", "name", "description", "author", "entrypoint", "icon", "permissions", "entities", "externalOrigins", "tools"]);
+const TOOL_NAME = /^[a-z][a-z0-9_]{0,47}$/;
 
 export function createSimulatedApp({ manifest, member = { id: 0, name: "Local member" }, workspace = { id: 0, name: "Local simulation" }, installationId = crypto.randomUUID() }) {
   installationId = uuid(installationId);
@@ -29,6 +30,15 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
   if (origins.length > 10 || new Set(origins).size !== origins.length ||
       origins.some((origin) => !isExternalOrigin(origin))) {
     fail("MANIFEST_INVALID", "External origins are exact lowercase https://host[:port] values.");
+  }
+  // ADR 0100: tools the assistant calls. The simulator checks their shape
+  // only; the platform runs them, never the application.
+  const tools = manifest.tools ?? [];
+  if (!Array.isArray(tools) || tools.length > 20 ||
+      new Set(tools.map((tool) => tool?.name)).size !== tools.length ||
+      tools.some((tool) => !tool || !TOOL_NAME.test(tool.name) || !["read", "write"].includes(tool.mode) ||
+        !["records", "endpoint"].includes(tool.target?.type))) {
+    fail("MANIFEST_INVALID", "Tools have a unique lowercase name, a mode and a records or endpoint target.");
   }
   const entities = new Map();
   if ((manifest.entities?.length ?? 0) > 32 || Boolean(manifest.entities?.length) !==
