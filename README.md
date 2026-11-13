@@ -78,7 +78,7 @@ click and `window.print()` need no declaration.
 Request only what you use: a Workspace administrator reviews the request and
 may grant less. Data permissions require `entities`, and `entities` require a
 data permission. Field types: `string`, `text`, `number`, `integer`, `boolean`,
-`date` (kept as a string) and `enum`. `sdkMajor: 1` is the contract this
+`date` (kept as a string), `enum` and `file` (see "Files"). `sdkMajor: 1` is the contract this
 package implements.
 
 ## Inside Zenextia
@@ -99,6 +99,33 @@ await tickets.delete(updated.id, updated.revision);
 `connectToPortal()` works only in an application opened from Zenextia; it
 fails with `AI_FACTORY_BRIDGE_REQUIRED` anywhere else. Show that error: do not
 fall back silently to the simulator.
+
+## Files
+
+A record can hold a file Zenextia keeps: an invoice, a photo, a signed
+document. Declare a field of type `file` (five at most per entity):
+
+```json
+{ "name": "invoice", "label": "Invoice", "type": "file" }
+```
+
+```js
+const kept = await app.files.upload(fileInput.files[0]);          // a File or a Blob, 8 MB at most
+const record = await subscriptions.create({ name: "Example", invoice: { fileId: kept.fileId } });
+// record.data.invoice is { fileId, name, contentType, size }
+const blob = await app.files.download(record.data.invoice.fileId);
+window.open(URL.createObjectURL(blob));                            // or a download link, after a click
+```
+
+- A file belongs to one record. Replacing the record without the field, or
+  deleting the record, removes the file. To keep it, send the reference you
+  read back.
+- An upload no record takes within a day is removed.
+- `upload` needs `data.write`, `download` needs `data.read`, and both need a
+  declared `file` field. Limits: 8 MB per file, 2,000 files and 500 MB per
+  application.
+- A `records` tool with a `file` field lets the assistant file a document the
+  member designates (see "Tools the assistant can call").
 
 ## Your own back-end
 

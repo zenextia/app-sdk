@@ -64,6 +64,20 @@ export function pageOptions({ after, pageSize = 25 } = {}) {
   return { after: after == null ? null : uuid(after), pageSize };
 }
 
+// ADR 0101: one file kept by Zenextia, at most 8 MiB.
+export const MAX_FILE_BYTES = 8 * 1024 * 1024;
+
+export function fileUpload(blob, { name } = {}) {
+  if (!(blob instanceof Blob)) fail("AI_FACTORY_FILE_INVALID", "Expected a Blob or a File.");
+  if (blob.size < 1) fail("AI_FACTORY_FILE_EMPTY", "A file must not be empty.");
+  if (blob.size > MAX_FILE_BYTES) fail("AI_FACTORY_FILE_TOO_LARGE", "A file is at most 8 MB.", 413);
+  name = name ?? blob.name ?? "file";
+  if (typeof name !== "string" || !name.trim() || name.length > 255) {
+    fail("AI_FACTORY_FILE_INVALID", "A file name has 1 to 255 characters.");
+  }
+  return { blob, name };
+}
+
 export function encodeData(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     fail("AI_FACTORY_ENTITY_INVALID", "Record data must be an object.");

@@ -1,6 +1,6 @@
-import { entityClient, fail, isExternalOrigin, uuid } from "./internal.js";
+import { entityClient, fail, fileUpload, isExternalOrigin, uuid } from "./internal.js";
 
-const TYPES = new Set(["string", "text", "date", "number", "integer", "boolean", "enum"]);
+const TYPES = new Set(["string", "text", "date", "number", "integer", "boolean", "enum", "file"]);
 // Device permissions (ADR 0093) are delegated by the portal; the simulator only accepts their declaration.
 const PERMISSIONS = new Set(["identity.read", "data.read", "data.write", "device.microphone", "device.camera", "device.screen", "clipboard.write"]);
 const MANIFEST_KEYS = new Set(["schemaVersion", "sdkMajor", "id", "version", "name", "description", "author", "entrypoint", "icon", "permissions", "entities", "externalOrigins", "tools"]);
@@ -61,6 +61,10 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
       }
       fields.set(field.name, field);
     }
+    // ADR 0101: at most five file fields per entity.
+    if ([...fields.values()].filter((field) => field.type === "file").length > 5) {
+      fail("MANIFEST_INVALID", "An entity declares at most five file fields.");
+    }
     entities.set(entity.entityType, { fields, records: new Map() });
   }
   let closed = false;
@@ -75,7 +79,8 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
       const value = data[name];
       if (!field) fail("AI_FACTORY_ENTITY_INVALID", "The record contains an undeclared field.");
       let valid;
-      if (field.type === "number") valid = typeof value === "number" && Number.isFinite(value);
+      if (field.type === "file") valid = Boolean(value) && typeof value === "object" && typeof value.fileId === "string";
+      else if (field.type === "number") valid = typeof value === "number" && Number.isFinite(value);
       else if (field.type === "integer") valid = Number.isInteger(value);
       else if (field.type === "boolean") valid = typeof value === "boolean";
       else valid = typeof value === "string";
@@ -87,6 +92,34 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
       if (field.required && (!Object.hasOwn(data, name) || data[name] === "")) {
         fail("AI_FACTORY_ENTITY_INVALID", "A required record field is missing.");
       }
+    }
+  }
+
+  // ADR 0101: files kept in memory. A file belongs to one record and goes with it.
+  const files = new Map();
+  const declaresFiles = [...entities.values()].some((entity) => [...entity.fields.values()].some((field) => field.type === "file"));
+  function requireFiles(permission) {
+    requirePermission(permission);
+    if (!declaresFiles) fail("AI_FACTORY_FILES_NOT_DECLARED", "The manifest declares no file field.", 404);
+  }
+  function holdFiles(entity, recordId, data) {
+    const held = new Set();
+    const next = { ...data };
+    for (const [name, field] of entity.fields) {
+      if (field.type !== "file" || !Object.hasOwn(data, name)) continue;
+      const file = files.get(data[name].fileId);
+      if (!file || (file.recordId !== null && file.recordId !== recordId) || held.has(file.reference.fileId)) {
+        fail("AI_FACTORY_FILE_NOT_AVAILABLE", "A file field names a file of this application that no other record holds.");
+      }
+      held.add(file.reference.fileId);
+      next[name] = { ...file.reference };
+    }
+    return { next, held };
+  }
+  function keepFiles(recordId, held) {
+    for (const [fileId, file] of files) {
+      if (held.has(fileId)) file.recordId = recordId;
+      else if (file.recordId === recordId) files.delete(fileId);
     }
   }
 
@@ -103,19 +136,24 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
     if (operation === "create") {
       validate(entity, values.data);
       const now = new Date().toISOString();
-      const record = { id: crypto.randomUUID(), data: values.data, revision: 1,
+      const id = crypto.randomUUID();
+      const { next, held } = holdFiles(entity, id, values.data);
+      const record = { id, data: next, revision: 1,
         schemaVersionId: "00000000-0000-0000-0000-000000000000", createdAt: now, updatedAt: now };
       entity.records.set(record.id, record);
+      keepFiles(id, held);
       return structuredClone(record);
     }
     const record = entity.records.get(values.id);
     if (!record) fail("AI_FACTORY_RECORD_NOT_FOUND", "The record was not found.", 404);
     if (operation === "get") return structuredClone(record);
     if (record.revision !== values.expectedRevision) fail("AI_FACTORY_RECORD_CONFLICT", "Read the record again before changing it.", 409);
-    if (operation === "delete") { entity.records.delete(values.id); return undefined; }
+    if (operation === "delete") { entity.records.delete(values.id); keepFiles(values.id, new Set()); return undefined; }
     validate(entity, values.data);
-    const updated = { ...record, data: values.data, revision: record.revision + 1, updatedAt: new Date().toISOString() };
+    const { next, held } = holdFiles(entity, record.id, values.data);
+    const updated = { ...record, data: next, revision: record.revision + 1, updatedAt: new Date().toISOString() };
     entity.records.set(record.id, updated);
+    keepFiles(record.id, held);
     return structuredClone(updated);
   }
 
@@ -136,6 +174,22 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
       },
     }),
     data: Object.freeze({ entity: (name) => entityClient(name, execute) }),
+    files: Object.freeze({
+      upload: async (blob, options) => {
+        requireFiles("data.write");
+        const file = fileUpload(blob, options);
+        const reference = { fileId: crypto.randomUUID(), name: file.name,
+          contentType: file.blob.type || "application/octet-stream", size: file.blob.size };
+        files.set(reference.fileId, { reference, blob: file.blob, recordId: null });
+        return { ...reference };
+      },
+      download: async (fileId) => {
+        requireFiles("data.read");
+        const file = files.get(uuid(fileId));
+        if (!file) fail("AI_FACTORY_FILE_NOT_FOUND", "The file was not found.", 404);
+        return file.blob;
+      },
+    }),
     session: Object.freeze({ revoke: async () => { closed = true; } }),
   });
 }

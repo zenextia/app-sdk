@@ -1,4 +1,4 @@
-import { apiBase, entityClient, externalOrigin, fail, uuid, ZenextiaAppError } from "./internal.js";
+import { apiBase, entityClient, externalOrigin, fail, fileUpload, uuid, ZenextiaAppError } from "./internal.js";
 
 export function createAppClient({ apiOrigin, installationId, accessToken, fetch: fetcher = globalThis.fetch }) {
   installationId = uuid(installationId);
@@ -47,6 +47,60 @@ export function createAppClient({ apiOrigin, installationId, accessToken, fetch:
     return payload.data;
   }
 
+  // ADR 0101: files are sent as a multipart form and read back as bytes, so
+  // they do not go through the JSON request above.
+  async function transfer(path, init) {
+    if (closed) fail("AI_FACTORY_SESSION_INVALID", "The application session was revoked.", 401);
+    const token = typeof accessToken === "function" ? await accessToken() : accessToken;
+    if (typeof token !== "string" || !/^zaf_s_[A-Za-z0-9_-]{43}$/.test(token)) {
+      fail("AI_FACTORY_SESSION_INVALID", "An application session token is required.", 401);
+    }
+    let response;
+    try {
+      response = await fetcher(root + path, {
+        credentials: "omit", redirect: "error", cache: "no-store", referrerPolicy: "no-referrer",
+        ...init, headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // The file may have been kept before the answer was lost. Never retry it.
+      fail("AI_FACTORY_NETWORK_ERROR", "The application request did not complete.", 0);
+    }
+    if (response.ok) return response;
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      // A refusal that is not the platform's envelope keeps its status.
+    }
+    throw new ZenextiaAppError(
+      payload?.error?.code ?? "AI_FACTORY_REQUEST_FAILED",
+      payload?.error?.message ?? "The application request failed.",
+      response.status, payload?.error?.requestId ?? null,
+    );
+  }
+
+  async function upload(blob, options) {
+    const file = fileUpload(blob, options);
+    const form = new FormData();
+    form.set("file", file.blob, file.name);
+    const response = await transfer("/files", { method: "POST", body: form });
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      fail("AI_FACTORY_RESPONSE_INVALID", "The platform returned an invalid response.", response.status);
+    }
+    if (typeof payload?.data?.fileId !== "string") {
+      fail("AI_FACTORY_RESPONSE_INVALID", "The platform response has no file reference.", response.status);
+    }
+    return payload.data;
+  }
+
+  async function download(fileId) {
+    const response = await transfer(`/files/${uuid(fileId)}`, { method: "GET" });
+    return response.blob();
+  }
+
   function execute(operation, entity, values) {
     const path = `/entities/${entity}`;
     if (operation === "list") {
@@ -70,6 +124,8 @@ export function createAppClient({ apiOrigin, installationId, accessToken, fetch:
       token: async (audience) => request("/identity/token", "POST", { audience: externalOrigin(audience) }),
     }),
     data: Object.freeze({ entity: (name) => entityClient(name, execute) }),
+    // ADR 0101: files a record's `file` field refers to.
+    files: Object.freeze({ upload: async (blob, options) => upload(blob, options), download: async (fileId) => download(fileId) }),
     session: Object.freeze({ revoke: async () => { await request("/session", "DELETE"); closed = true; } }),
   });
 }
