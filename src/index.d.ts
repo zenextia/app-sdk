@@ -89,6 +89,13 @@ export function createAppClient(options: {
   accessToken: string | (() => string | Promise<string>); fetch?: typeof globalThis.fetch;
 }): AppClient;
 export function connectToPortal(): Promise<AppClient>;
+/**
+ * Opens a link in a new tab. Inside Zenextia the portal opens it, for a site
+ * listed in the manifest's `linkOrigins` (or `externalOrigins`) and approved
+ * by the administrator. Returns false for an address that is not http(s).
+ */
+export function openUrl(url: string | URL): boolean;
+
 /** On the author's back-end: has Zenextia check an identity token; null when it is not valid. */
 export function verifyIdentityToken(options: {
   apiOrigin: string; installationId: string; audience: string; token: string;
