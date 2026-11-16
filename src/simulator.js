@@ -3,7 +3,7 @@ import { entityClient, fail, fileUpload, isExternalOrigin, uuid } from "./intern
 const TYPES = new Set(["string", "text", "date", "number", "integer", "boolean", "enum", "file"]);
 // Device permissions (ADR 0093) are delegated by the portal; the simulator only accepts their declaration.
 const PERMISSIONS = new Set(["identity.read", "data.read", "data.write", "device.microphone", "device.camera", "device.screen", "clipboard.write"]);
-const MANIFEST_KEYS = new Set(["schemaVersion", "sdkMajor", "id", "version", "name", "description", "author", "entrypoint", "icon", "permissions", "entities", "externalOrigins", "tools"]);
+const MANIFEST_KEYS = new Set(["schemaVersion", "sdkMajor", "id", "version", "name", "description", "author", "entrypoint", "icon", "permissions", "entities", "externalOrigins", "tools", "linkOrigins"]);
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,47}$/;
 
 export function createSimulatedApp({ manifest, member = { id: 0, name: "Local member" }, workspace = { id: 0, name: "Local simulation" }, installationId = crypto.randomUUID() }) {
@@ -30,6 +30,12 @@ export function createSimulatedApp({ manifest, member = { id: 0, name: "Local me
   if (origins.length > 10 || new Set(origins).size !== origins.length ||
       origins.some((origin) => !isExternalOrigin(origin))) {
     fail("MANIFEST_INVALID", "External origins are exact lowercase https://host[:port] values.");
+  }
+  // ADR 0102: sites the portal opens in a new tab, same shape as external origins.
+  const links = manifest.linkOrigins ?? [];
+  if (!Array.isArray(links) || links.length > 20 || new Set(links).size !== links.length ||
+      links.some((origin) => !isExternalOrigin(origin))) {
+    fail("MANIFEST_INVALID", "Link origins are exact lowercase https://host[:port] values.");
   }
   // ADR 0100: tools the assistant calls. The simulator checks their shape
   // only; the platform runs them, never the application.

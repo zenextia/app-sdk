@@ -100,6 +100,33 @@ await tickets.delete(updated.id, updated.revision);
 fails with `AI_FACTORY_BRIDGE_REQUIRED` anywhere else. Show that error: do not
 fall back silently to the simulator.
 
+## Links to other sites
+
+An application runs in a frame that cannot open a tab itself. List the sites
+it links to in `linkOrigins` (up to 20 exact `https://host[:port]` origins):
+
+```json
+"linkOrigins": ["https://www.linkedin.com", "https://app.hubspot.com", "https://www.notion.so"]
+```
+
+Once an administrator approves them, Zenextia opens those links in a new tab:
+`<a href="…" target="_blank">`, a Ctrl or middle click on a link to another
+site, and `window.open(url)` all work as written. To open a link from code:
+
+```js
+import { openUrl } from "@zenextia/app-sdk";
+
+openUrl(`https://www.linkedin.com/in/${profile}`);
+```
+
+- An origin in `externalOrigins` may be linked to without being repeated.
+- A link to a site that is not listed and approved does not open; the portal
+  names the site it refused.
+- The tab opens without a referrer or a link back to the application, and
+  `window.open` returns `null`.
+- The address of a link is visible to that site: put in it only what you
+  would send to it.
+
 ## Files
 
 A record can hold a file Zenextia keeps: an invoice, a photo, a signed
@@ -114,7 +141,7 @@ const kept = await app.files.upload(fileInput.files[0]);          // a File or a
 const record = await subscriptions.create({ name: "Example", invoice: { fileId: kept.fileId } });
 // record.data.invoice is { fileId, name, contentType, size }
 const blob = await app.files.download(record.data.invoice.fileId);
-window.open(URL.createObjectURL(blob));                            // or a download link, after a click
+link.href = URL.createObjectURL(blob); link.download = record.data.invoice.name; // a download link, clicked by the member
 ```
 
 - A file belongs to one record. Replacing the record without the field, or

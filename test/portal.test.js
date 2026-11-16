@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { connectToPortal } from "@zenextia/app-sdk";
+import { connectToPortal, createSimulatedApp, openUrl } from "@zenextia/app-sdk";
 
 const installation = "00000000-0000-0000-0000-000000000001";
 const token = "zaf_s_" + "s".repeat(43);
@@ -35,4 +35,27 @@ test("the connected client sends the application token only, and revoking closes
     await client.session.revoke();
     assert.equal(disconnected, true);
   } finally { delete globalThis.__ZENEXTIA_HOST__; globalThis.fetch = fetcher; }
+});
+
+test("openUrl goes through the portal inside Zenextia and opens the tab outside (ADR 0102)", () => {
+  const sent = [];
+  globalThis.__ZENEXTIA_HOST__ = { openUrl: (url) => { sent.push(url); return true; } };
+  try {
+    assert.equal(openUrl(new URL("https://www.linkedin.com/in/test")), true);
+    assert.deepEqual(sent, ["https://www.linkedin.com/in/test"]);
+  } finally { delete globalThis.__ZENEXTIA_HOST__; }
+  const opened = [];
+  const previous = globalThis.open;
+  globalThis.open = (...args) => { opened.push(args); return null; };
+  try {
+    assert.equal(openUrl("https://app.hubspot.com/x"), true);
+    assert.equal(openUrl("javascript:alert(1)"), false);
+    assert.deepEqual(opened, [["https://app.hubspot.com/x", "_blank", "noopener,noreferrer"]]);
+  } finally { globalThis.open = previous; }
+});
+
+test("the simulator accepts link origins and refuses loose ones", () => {
+  const manifest = { schemaVersion: 1, sdkMajor: 1, id: "test-links", version: "1.0.0", name: "TEST", description: "TEST", author: "TEST" };
+  assert.ok(createSimulatedApp({ manifest: { ...manifest, linkOrigins: ["https://www.linkedin.com"] } }));
+  assert.throws(() => createSimulatedApp({ manifest: { ...manifest, linkOrigins: ["https://*.hubspot.com"] } }));
 });
